@@ -2,6 +2,7 @@ from multiprocessing import Process, Queue
 import time
 import logging
 import re
+import atexit
 from neo4j.v1 import GraphDatabase, basic_auth
 
 logging.basicConfig(level=logging.INFO, format='(%(processName)s: %(asctime)s) %(message)s',)
@@ -107,7 +108,6 @@ class RegexHandler(Process):
                 session.close()
         logging.warning("Finished")
 
-
 if __name__ == "__main__":
     file_reader = FileReader(name="FileReader");
 
@@ -121,6 +121,12 @@ if __name__ == "__main__":
     file_reader.start()
     for handler in workerArray:
         handler.start()
+    def closer():
+        for worker in workerArray:
+            worker.terminate()
+        file_reader.terminate()
+        del text_queue
+    atexit.register(closer)
     # db_transmit_1.start()
     # db_transmit_2.start()
     file_reader.join()
