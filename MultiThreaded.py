@@ -1,4 +1,5 @@
 import multiprocessing
+import queue
 from multiprocessing import Process, Queue
 import time
 import logging
@@ -23,7 +24,6 @@ class FileReader(Process):
             pc = 0
             ft = 0
             ID = 0
-            mc = 0
             count = 1
             inText = False
             isRedirect = None
@@ -53,11 +53,10 @@ class FileReader(Process):
                         if line[0:5] == '<text':
                             inText = True
                         if not isRedirect and (ft == 0 or ft == 6) and inText:
-                            mc += 1
                             text_queue.put((ft, ID, line), block=True, timeout=None)
                 elif line == '<page>':
                     count += 1
-                    logging.warning(mc)
+                    logging.warning(count)
                     inPage = True
                     isRedirect = False
                     inText = False
@@ -73,10 +72,10 @@ class RegexHandler(Process):
         empty_count = 0
         pattern = re.compile("\[\[File\:(\w|\d|\s|\-|\'|_)*\.\w*\|.|\[\[(\w|\d|\s|\-|\||'|\(|\))*\]\]")
         driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
-        while empty_count < 10:
+        while empty_count < 5:
             entr = None
             try:
-                entr = text_queue.get(block=True, timeout=5)
+                entr = text_queue.get(block=True, timeout=1)
             except queue.Empty:
                 empty_count += 1
                 logging.warning("Empty Text Queue Count:" + str(empty_count))
@@ -90,31 +89,28 @@ class RegexHandler(Process):
                 elif entr[0] == 6:
                     search = ''.join([search, 'file {id: {id}}), '])
                 result = re.finditer(pattern, entr[2])
-                session = driver.session()
-                tx = session.begin_transaction()
-                for k in result:
-                    links = k.group(0)[2:-2].split('|')
-                    for l in links:
-                        success = False
-                        err_cnt = 0
-                        while not success:
-                            try:
-                                l = l.lower()
-                                if l[0:5].lower() == "file:":
-                                    tx.run(''.join([search, '(b:file {title: {title}}) CREATE \
-                                    (a)-[r:file_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
+                with driver.session() as session:
+                    for k in result:
+                        links = k.group(0)[2:-2].split('|')
+                        for l in links:
+                            success = False
+                            err_cnt = 0
+                            while not success:
+                                try:
+                                    l = l.lower()
+                                    if l[0:5].lower() == "file:":
+                                        session.run(''.join([search, '(b:file {title: {title}}) CREATE \
+                                        (a)-[r:file_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
+                                    else:
+                                        session.run(''.join([search, '(b:article {title: {title}}) CREATE \
+                                        (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
+                                except TimeoutError:
+                                    #try again!!
+                                    err_cnt += 1
+                                    logging.warning("Session aquiring time out count: " + str(err_cnt))
                                 else:
-                                    tx.run(''.join([search, '(b:article {title: {title}}) CREATE \
-                                    (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
-                            except TimeoutError:
-                                #try again!!
-                                err_cnt += 1
-                                logging.warning("Session aquiring time out count: " + str(err_cnt))
-                            else:
-                                success = True
-                tx.commit()
-                tx.close()
-                session.close()
+                                    success = True
+                    session.close()
         logging.warning("Finished")
 
 
@@ -127,27 +123,39 @@ if __name__ == "__main__":
     CAP_COUNT = 1000
 
 
-    file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
+    OUTPUT_FILE = 'timer.txt'
+    f = open(OUTPUT_FILE, 'w')
+    driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
 
-    NUM_WORKERS = 12
-    workerArray = [''] * NUM_WORKERS;
-    for i in range(0, NUM_WORKERS):
-        workerArray[i] = RegexHandler(text_queue, name="Regex " + str(i + 1))
+    for NUM_WORKERS in range(2, 13):
+        t = time.time()
+        file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
 
-    # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
-    # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
-    file_reader.start()
-    for handler in workerArray:
-        handler.start()
-    def closer(text_queue):
+        workerArray = [''] * NUM_WORKERS;
+        for i in range(0, NUM_WORKERS):
+            workerArray[i] = RegexHandler(text_queue, name="Regex " + str(i + 1))
+
+        # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
+        # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
+        file_reader.start()
+        for handler in workerArray:
+            handler.start()
+        def closer(text_queue):
+            for worker in workerArray:
+                worker.terminate()
+            file_reader.terminate()
+            del text_queue
+        atexit.register(closer, text_queue)
+        file_reader.join()
+        logging.warning("Joined File Reader!")
         for worker in workerArray:
-            worker.terminate()
-        file_reader.terminate()
-        del text_queue
-    atexit.register(closer, text_queue)
-    # db_transmit_1.start()
-    # db_transmit_2.start()
-    file_reader.join()
-    logging.warning("Joined File Reader!")
-    for worker in workerArray:
-        worker.join()
+            worker.join()
+            logging.warning("Joined " + str(worker))
+        f.write(str(time.time() - t))
+        f.write('\n')
+        f.flush()
+        with driver.session() as session:
+            session.run("match ()-[r]->() delete r")
+            logging.warning("Deleted all relationships")
+            session.close()
+    f.close()
