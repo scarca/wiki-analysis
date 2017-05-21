@@ -76,27 +76,32 @@ class RegexHandler(Process):
                 elif entr[0] == 6:
                     search = ''.join([search, 'file {id: {id}}), '])
                 result = re.finditer(pattern, entr[2])
-                with driver.session() as session:
-                    for k in result:
-                        links = k.group(0)[2:-2].split('|')
-                        for l in links:
-                            success = False
-                            err_cnt = 0
-                            while not success:
-                                try:
-                                    l = l.lower()
-                                    if l[0:5].lower() == "file:":
-                                        session.run(''.join([search, '(b:file {title: {title}}) CREATE \
-                                        (a)-[r:file_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
-                                    else:
-                                        session.run(''.join([search, '(b:article {title: {title}}) CREATE \
-                                        (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
-                                except TimeoutError:
-                                    #try again!!
-                                    err_cnt += 1
-                                    logging.warning("Session aquiring time out count: " + str(err_cnt))
+                session = driver.session()
+                tx = session.begin_transaction()
+                for k in result:
+                    links = k.group(0)[2:-2].split('|')
+                    for l in links:
+                        success = False
+                        err_cnt = 0
+                        while not success:
+                            try:
+                                l = l.lower()
+                                if l[0:5].lower() == "file:":
+                                    tx.run(''.join([search, '(b:file {title: {title}}) CREATE \
+                                    (a)-[r:file_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
                                 else:
-                                    success = True
+                                    tx.run(''.join([search, '(b:article {title: {title}}) CREATE \
+                                    (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
+                            except TimeoutError:
+                                #try again!!
+                                err_cnt += 1
+                                logging.warning("Session aquiring time out count: " + str(err_cnt))
+                            else:
+                                success = True
+                tx.commit()
+                tx.sync()
+                tx.close()
+                session.close()
         logging.warning("Finished")
 
 
