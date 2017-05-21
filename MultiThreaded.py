@@ -4,10 +4,9 @@ import logging
 import re
 from neo4j.v1 import GraphDatabase, basic_auth
 
-logging.basicConfig(level=logging.WARNING, format='(%(threadName)s: %(asctime)s) %(message)s',)
+logging.basicConfig(level=logging.INFO, format='(%(processName)s: %(asctime)s) %(message)s',)
 
-TEXT_QUEUE_SIZE = 10000
-DB_QUEUE_SIZE = 21000000
+TEXT_QUEUE_SIZE = 100000
 
 text_queue = Queue(TEXT_QUEUE_SIZE)
 # db_queue = queue.Queue(DB_QUEUE_SIZE)
@@ -24,6 +23,8 @@ class FileReader(Process):
             isRedirect = None
             for line in wiki:
                 line = line.strip()
+                if count % 100000 == 0 and not inPage:
+                    logging.info(count)
                 if line == '</page>':
                     inPage = False
                 elif inPage:
@@ -66,6 +67,8 @@ class RegexHandler(Process):
                 empty_count += 1
                 logging.warning("Empty Text Queue Count:" + str(empty_count))
             else:
+                if len(entr[2]) > 2000000:
+                    logging.info("Entry with ID " + str(entr[1]) + "has 2m+ len")
                 empty_count = 0
                 search = "MATCH (a:"
                 if entr[0] == 0:
@@ -93,27 +96,25 @@ class RegexHandler(Process):
                                     err_cnt += 1
                                     logging.warning("Session aquiring time out count: " + str(err_cnt))
                                 else:
-                                    err_cnt = 0
                                     success = True
+        logging.warning("Finished")
 
 
 file_reader = FileReader(name="FileReader");
-regex_1 = RegexHandler(name="Regex 1");
-regex_2 = RegexHandler(name="Regex 2");
-regex_3 = RegexHandler(name="Regex 3");
+
+NUM_WORKERS = 12
+workerArray = [''] * 8;
+for i in range(0, 8):
+    workerArray[i] = RegexHandler(name="Regex " + str(i + 1))
+
 # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
 # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
 file_reader.start()
-regex_1.start()
-regex_2.start()
-regex_3.start()
+for handler in workerArray:
+    handler.start()
 # db_transmit_1.start()
 # db_transmit_2.start()
 file_reader.join()
 logging.warning("Joined File Reader!")
-regex_1.join()
-logging.warning("Joined Regex 1")
-regex_2.join()
-logging.warning("Joined Regex 2")
-regex_3.join()
-logging.warning("Joined Regex 3")
+for worker in workerArray:
+    worker.join()
