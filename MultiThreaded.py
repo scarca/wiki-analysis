@@ -1,3 +1,4 @@
+import multiprocessing
 from multiprocessing import Process, Queue
 import time
 import logging
@@ -5,30 +6,32 @@ import re
 import atexit
 from neo4j.v1 import GraphDatabase, basic_auth
 
-logging.basicConfig(level=logging.INFO, format='(%(processName)s: %(asctime)s) %(message)s',)
+logging.basicConfig(level=logging.WARNING, format='(%(processName)s: %(asctime)s) %(message)s',)
 
-TEXT_QUEUE_SIZE = 100000
-
-text_queue = Queue(TEXT_QUEUE_SIZE)
-# db_queue = queue.Queue(DB_QUEUE_SIZE)
-CAP_ENABLED = True
-CAP_COUNT = 1000
 class FileReader(Process):
+    def __init__(self, q, cap_enabled=False, cap_count=0, name=None):
+        self.q = q
+        self.cap_enabled = cap_enabled
+        self.cap_count = cap_count
+        super(FileReader, self).__init__(name=name)
     def run(self):
+        text_queue = self.q
         inPage = False
+        CAP_ENABLED = self.cap_enabled
+        CAP_COUNT = self.cap_count
         with open('enwiki-20170420-pages-articles.xml', 'r') as wiki:
             pc = 0
             ft = 0
             ID = 0
-            count = 0
+            count = 1
             inText = False
             isRedirect = None
             for line in wiki:
                 line = line.strip()
-                if CAP_ENABLED && count >= CAP_COUNT:
+                if CAP_ENABLED and count >= CAP_COUNT:
                     break
                 if count % 100000 == 0 and not inPage:
-                    logging.info(count)
+                    logging.warning(count)
                 if line == '</page>':
                     inPage = False
                 elif inPage:
@@ -59,7 +62,11 @@ class FileReader(Process):
         logging.warning("File Reader Reached End of Control")
 
 class RegexHandler(Process):
+    def __init__(self, q, name=None):
+        self.q = q
+        super(RegexHandler, self).__init__(name=name)
     def run(self):
+        text_queue = self.q
         empty_count = 0
         pattern = re.compile("\[\[File\:(\w|\d|\s|\-|\'|_)*\.\w*\|.|\[\[(\w|\d|\s|\-|\||'|\(|\))*\]\]")
         driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
@@ -103,30 +110,38 @@ class RegexHandler(Process):
                             else:
                                 success = True
                 tx.commit()
-                tx.sync()
                 tx.close()
                 session.close()
         logging.warning("Finished")
 
+
 if __name__ == "__main__":
-    file_reader = FileReader(name="FileReader");
+    TEXT_QUEUE_SIZE = 100000
+    manager = multiprocessing.Manager()
+    text_queue = manager.Queue(TEXT_QUEUE_SIZE)
+    # db_queue = queue.Queue(DB_QUEUE_SIZE)
+    CAP_ENABLED = True
+    CAP_COUNT = 1000
+
+
+    file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
 
     NUM_WORKERS = 12
     workerArray = [''] * 8;
     for i in range(0, 8):
-        workerArray[i] = RegexHandler(name="Regex " + str(i + 1))
+        workerArray[i] = RegexHandler(text_queue, name="Regex " + str(i + 1))
 
     # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
     # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
     file_reader.start()
     for handler in workerArray:
         handler.start()
-    def closer():
+    def closer(text_queue):
         for worker in workerArray:
             worker.terminate()
         file_reader.terminate()
         del text_queue
-    atexit.register(closer)
+    atexit.register(closer, text_queue)
     # db_transmit_1.start()
     # db_transmit_2.start()
     file_reader.join()
