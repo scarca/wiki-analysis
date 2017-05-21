@@ -23,6 +23,7 @@ class FileReader(Process):
             pc = 0
             ft = 0
             ID = 0
+            mc = 0
             count = 1
             inText = False
             isRedirect = None
@@ -52,9 +53,11 @@ class FileReader(Process):
                         if line[0:5] == '<text':
                             inText = True
                         if not isRedirect and (ft == 0 or ft == 6) and inText:
+                            mc += 1
                             text_queue.put((ft, ID, line), block=True, timeout=None)
                 elif line == '<page>':
                     count += 1
+                    logging.warning(mc)
                     inPage = True
                     isRedirect = False
                     inText = False
@@ -127,8 +130,8 @@ if __name__ == "__main__":
     file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
 
     NUM_WORKERS = 12
-    workerArray = [''] * 8;
-    for i in range(0, 8):
+    workerArray = [''] * NUM_WORKERS;
+    for i in range(0, NUM_WORKERS):
         workerArray[i] = RegexHandler(text_queue, name="Regex " + str(i + 1))
 
     # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
