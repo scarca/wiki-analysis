@@ -120,7 +120,7 @@ if __name__ == "__main__":
     text_queue = manager.Queue(TEXT_QUEUE_SIZE)
     # db_queue = queue.Queue(DB_QUEUE_SIZE)
     CAP_ENABLED = True
-    CAP_COUNT = 1000
+    CAP_COUNT = 500
 
 
     OUTPUT_FILE = 'timer.txt'
@@ -128,34 +128,35 @@ if __name__ == "__main__":
     driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
 
     for NUM_WORKERS in range(2, 13):
-        t = time.time()
-        file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
+        for i in range(0, 5):
+            t = time.time()
+            file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
 
-        workerArray = [''] * NUM_WORKERS;
-        for i in range(0, NUM_WORKERS):
-            workerArray[i] = RegexHandler(text_queue, name="Regex " + str(i + 1))
+            workerArray = [''] * NUM_WORKERS;
+            for i in range(0, NUM_WORKERS):
+                workerArray[i] = RegexHandler(text_queue, name="Regex " + str(i + 1))
 
-        # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
-        # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
-        file_reader.start()
-        for handler in workerArray:
-            handler.start()
-        def closer(text_queue):
+            # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
+            # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
+            file_reader.start()
+            for handler in workerArray:
+                handler.start()
+            def closer(text_queue):
+                for worker in workerArray:
+                    worker.terminate()
+                file_reader.terminate()
+                del text_queue
+            atexit.register(closer, text_queue)
+            file_reader.join()
+            logging.warning("Joined File Reader!")
             for worker in workerArray:
-                worker.terminate()
-            file_reader.terminate()
-            del text_queue
-        atexit.register(closer, text_queue)
-        file_reader.join()
-        logging.warning("Joined File Reader!")
-        for worker in workerArray:
-            worker.join()
-            logging.warning("Joined " + str(worker))
-        f.write(str(time.time() - t))
-        f.write('\n')
-        f.flush()
-        with driver.session() as session:
-            session.run("match ()-[r]->() delete r")
-            logging.warning("Deleted all relationships")
-            session.close()
+                worker.join()
+                logging.warning("Joined " + str(worker))
+            f.write(str(time.time() - t))
+            f.write('\n')
+            f.flush()
+            with driver.session() as session:
+                session.run("match ()-[r]->() delete r")
+                logging.warning("Deleted all relationships")
+                session.close()
     f.close()
