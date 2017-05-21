@@ -10,7 +10,8 @@ TEXT_QUEUE_SIZE = 100000
 
 text_queue = Queue(TEXT_QUEUE_SIZE)
 # db_queue = queue.Queue(DB_QUEUE_SIZE)
-
+CAP_ENABLED = True
+CAP_COUNT = 1000
 class FileReader(Process):
     def run(self):
         inPage = False
@@ -23,6 +24,8 @@ class FileReader(Process):
             isRedirect = None
             for line in wiki:
                 line = line.strip()
+                if CAP_ENABLED && count >= CAP_COUNT:
+                    break
                 if count % 100000 == 0 and not inPage:
                     logging.info(count)
                 if line == '</page>':
@@ -105,21 +108,22 @@ class RegexHandler(Process):
         logging.warning("Finished")
 
 
-file_reader = FileReader(name="FileReader");
+if __name__ == "__main__":
+    file_reader = FileReader(name="FileReader");
 
-NUM_WORKERS = 12
-workerArray = [''] * 8;
-for i in range(0, 8):
-    workerArray[i] = RegexHandler(name="Regex " + str(i + 1))
+    NUM_WORKERS = 12
+    workerArray = [''] * 8;
+    for i in range(0, 8):
+        workerArray[i] = RegexHandler(name="Regex " + str(i + 1))
 
-# db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
-# db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
-file_reader.start()
-for handler in workerArray:
-    handler.start()
-# db_transmit_1.start()
-# db_transmit_2.start()
-file_reader.join()
-logging.warning("Joined File Reader!")
-for worker in workerArray:
-    worker.join()
+    # db_transmit_1 = DBTransmitter(name = "DB Transmitter 1");
+    # db_transmit_2 = DBTransmitter(name = "DB Transmitter 2");
+    file_reader.start()
+    for handler in workerArray:
+        handler.start()
+    # db_transmit_1.start()
+    # db_transmit_2.start()
+    file_reader.join()
+    logging.warning("Joined File Reader!")
+    for worker in workerArray:
+        worker.join()
