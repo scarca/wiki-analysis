@@ -5,6 +5,7 @@ import time
 import logging
 import re
 import atexit
+import argparse
 from neo4j.v1 import GraphDatabase, basic_auth
 
 logging.basicConfig(level=logging.WARNING, format='(%(processName)s: %(asctime)s) %(message)s',)
@@ -113,22 +114,53 @@ class RegexHandler(Process):
                     session.close()
         logging.warning("Finished")
 
+def attempt_delete_relations(relationCount=0):
+    driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
+    if relationCount == 0:
+        try:
+            session = driver.session()
+            res = session.run("match ()-[r]->() delete r")
+        except:
+            return False
+        else:
+            return True
+    else:
+        #Unimplemented
+        return False
+
+
 
 if __name__ == "__main__":
-    TEXT_QUEUE_SIZE = 100000
+    parser = argparse.ArgumentParser(description='Perform multithreaded building of wikipedia database')
+    parser.add_argument('--threads', type=int, default=2)
+    parser.add_argument('--test', action='store_true', default=False)
+    parser.add_argument('--test-count', type=int, default=5)
+    parser.add_argument('--test-range-start', type=int, default=2)
+    parser.add_argument('--queue-size', type=int, default=100000)
+    parser.add_argument('--test-cap', type=int, default=1000)
+
+    args = vars(parser.parse_args())
+    print(args)
+    ITER_COUNT = 1
+    N_WORK_LOW = args['threads']
+    N_WORK_HIGH = args['threads'] + 1
+    if args['test']:
+        N_WORK_LOW = args['test_range_start']
+        ITER_COUNT = args['test_count']
+    TEXT_QUEUE_SIZE = args['queue_size']
     manager = multiprocessing.Manager()
     text_queue = manager.Queue(TEXT_QUEUE_SIZE)
     # db_queue = queue.Queue(DB_QUEUE_SIZE)
-    CAP_ENABLED = True
-    CAP_COUNT = 1000
+    CAP_ENABLED = args['test']
+    CAP_COUNT = args['test_cap']
 
 
     OUTPUT_FILE = 'timer.txt'
     f = open(OUTPUT_FILE, 'w')
     driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
 
-    for NUM_WORKERS in range(2, 13):
-        for i in range(0, 5):
+    for NUM_WORKERS in range(N_WORK_LOW, N_WORK_HIGH):
+        for i in range(0, 1):
             t = time.time()
             file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
 
@@ -155,8 +187,9 @@ if __name__ == "__main__":
             f.write(str(time.time() - t))
             f.write('\n')
             f.flush()
-            with driver.session() as session:
-                session.run("match ()-[r]->() delete r")
-                logging.warning("Deleted all relationships")
-                session.close()
+            if CAP_ENABLED:
+                with driver.session() as session:
+                    session.run("match ()-[r]->() delete r")
+                    logging.warning("Deleted all relationships")
+                    session.close()
     f.close()
