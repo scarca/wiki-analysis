@@ -120,7 +120,7 @@ if __name__ == "__main__":
     text_queue = manager.Queue(TEXT_QUEUE_SIZE)
     # db_queue = queue.Queue(DB_QUEUE_SIZE)
     CAP_ENABLED = True
-    CAP_COUNT = 500
+    CAP_COUNT = 1000
 
 
     OUTPUT_FILE = 'timer.txt'
