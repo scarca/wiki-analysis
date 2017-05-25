@@ -67,12 +67,14 @@ class FileReader(Process):
 class RegexHandler(Process):
     def __init__(self, q, name=None):
         self.q = q
+        self.driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
         super(RegexHandler, self).__init__(name=name)
     def run(self):
         text_queue = self.q
         empty_count = 0
         pattern = re.compile("\[\[File\:(\w|\d|\s|\-|\'|_)*\.\w*\|.|\[\[(\w|\d|\s|\-|\||'|\(|\))*\]\]")
-        driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
+        session = self.driver.session()
+        session_count = 0
         while empty_count < 5:
             entr = None
             try:
@@ -90,28 +92,31 @@ class RegexHandler(Process):
                 elif entr[0] == 6:
                     search = ''.join([search, 'file {id: {id}}), '])
                 result = re.finditer(pattern, entr[2])
-                with driver.session() as session:
-                    for k in result:
-                        links = k.group(0)[2:-2].split('|')
-                        for l in links:
-                            success = False
-                            err_cnt = 0
-                            while not success:
-                                try:
-                                    l = l.lower()
-                                    if l[0:5].lower() == "file:":
-                                        session.run(''.join([search, '(b:file {title: {title}}) CREATE \
-                                        (a)-[r:file_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
-                                    else:
-                                        session.run(''.join([search, '(b:article {title: {title}}) CREATE \
-                                        (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
-                                except TimeoutError:
-                                    #try again!!
-                                    err_cnt += 1
-                                    logging.warning("Session aquiring time out count: " + str(err_cnt))
+                for k in result:
+                    links = k.group(0)[2:-2].split('|')
+                    for l in links:
+                        success = False
+                        err_cnt = 0
+                        while not success:
+                            try:
+                                l = l.lower()
+                                if l[0:5].lower() == "file:":
+                                    session.run(''.join([search, '(b:file {title: {title}}) CREATE \
+                                    (a)-[r:file_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
                                 else:
-                                    success = True
+                                    session.run(''.join([search, '(b:article {title: {title}}) CREATE \
+                                    (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
+                            except TimeoutError:
+                                #try again!!
+                                err_cnt += 1
+                                logging.warning("Session aquiring time out count: " + str(err_cnt))
+                            else:
+                                session_count += 1
+                                success = True
+                if session_count > 100000:
                     session.close()
+                    session = self.driver.session()
+                    session_count  = 0
         logging.warning("Finished")
 
 def attempt_delete_relations(relationCount=0):
@@ -160,7 +165,7 @@ if __name__ == "__main__":
     driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "neo4J"))
 
     for NUM_WORKERS in range(N_WORK_LOW, N_WORK_HIGH):
-        for i in range(0, 1):
+        for i in range(0, ITER_COUNT):
             t = time.time()
             file_reader = FileReader(text_queue, cap_enabled=CAP_ENABLED, cap_count=CAP_COUNT, name="FileReader");
 
@@ -189,7 +194,14 @@ if __name__ == "__main__":
             f.flush()
             if CAP_ENABLED:
                 with driver.session() as session:
-                    session.run("match ()-[r]->() delete r")
-                    logging.warning("Deleted all relationships")
-                    session.close()
+                    successful = False
+                    while not successful:
+                        try:
+                            session.run("match ()-[r]->() delete r")
+                            logging.warning("Deleted all relationships")
+                            session.close()
+                        except Exception:
+                            pass
+                        else:
+                            successful = True
     f.close()
