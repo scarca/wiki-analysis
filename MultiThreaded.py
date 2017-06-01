@@ -75,6 +75,7 @@ class RegexHandler(Process):
         pattern = re.compile("\[\[File\:(\w|\d|\s|\-|\'|_)*\.\w*\|.|\[\[(\w|\d|\s|\-|\||'|\(|\))*\]\]")
         session = self.driver.session()
         session_count = 0
+        err_cnt = 0
         while empty_count < 5:
             entr = None
             try:
@@ -96,7 +97,6 @@ class RegexHandler(Process):
                     links = k.group(0)[2:-2].split('|')
                     for l in links:
                         success = False
-                        err_cnt = 0
                         while not success:
                             try:
                                 l = l.lower()
@@ -114,9 +114,18 @@ class RegexHandler(Process):
                                 session_count += 1
                                 success = True
                 if session_count > 100000:
-                    session.close()
-                    session = self.driver.session()
-                    session_count  = 0
+                    successful = False
+                    while not successful:
+                        try:
+                            session.close()
+                            session = self.driver.session()
+                            session_count  = 0
+                        except:
+                            err_cnt += 1
+                            logging.warning("Session refresh failed" + str(err_cnt))
+                        else:
+                            successful = True
+
         logging.warning("Finished")
 
 def attempt_delete_relations(relationCount=0):
