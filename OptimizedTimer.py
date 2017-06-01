@@ -27,19 +27,20 @@ class CreateNode(mp.Process):
                 logging.warning("Empty Queue Count" + str(empty_count))
             else:
                 successful = False
-                try:
-                    if ft == 0:
-                        self.session.run("CREATE (a:article {title: {title}, id:{id}})", {"title": title, "id": ID})
-                        self.session_count += 1
-                    elif ft == 6:
-                        self.session.run("CREATE (a:file {title: {title}, id:{id}})", {"title": title, "id": ID})
-                        self.session_count += 1
-                    else:
+                while not successful:
+                    try:
+                        if ft == 0:
+                            self.session.run("CREATE (a:article {title: {title}, id:{id}})", {"title": title, "id": ID})
+                            self.session_count += 1
+                        elif ft == 6:
+                            self.session.run("CREATE (a:file {title: {title}, id:{id}})", {"title": title, "id": ID})
+                            self.session_count += 1
+                        else:
+                            pass
+                    except:
                         pass
-                except:
-                    pass
-                else:
-                    successful = True
+                    else:
+                        successful = True
             if self.session_count > 100000:
                 self.session.close()
                 self.session = self.driver.session()

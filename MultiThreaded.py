@@ -106,7 +106,7 @@ class RegexHandler(Process):
                                 else:
                                     session.run(''.join([search, '(b:article {title: {title}}) CREATE \
                                     (a)-[r:article_link {source: a.id, target: b.id}]->(b)']), {"id": entr[1], "title": l})
-                            except TimeoutError:
+                            except:
                                 #try again!!
                                 err_cnt += 1
                                 logging.warning("Session aquiring time out count: " + str(err_cnt))
